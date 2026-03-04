@@ -1,8 +1,84 @@
+using System.ComponentModel;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace Awk.Commands;
 
-internal sealed class SkillCommand : AsyncCommand<SkillCommand.Settings>
+internal sealed class SkillInstallSettings : CommandSettings
+{
+    [CommandOption("--claude")]
+    [Description("Install skill for Claude Code (~/.claude/skills/).")]
+    public bool Claude { get; set; }
+
+    [CommandOption("--codex")]
+    [Description("Install skill for Codex (~/.codex/skills/).")]
+    public bool Codex { get; set; }
+}
+
+internal sealed class SkillInstallCommand : AsyncCommand<SkillInstallSettings>
+{
+    private const string SkillDirName = "awork-cli";
+    private const string SkillFileName = "SKILL.md";
+
+    private static readonly Dictionary<string, string> Targets = new()
+    {
+        ["Claude Code"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "skills", SkillDirName, SkillFileName),
+        ["Codex"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".codex", "skills", SkillDirName, SkillFileName),
+    };
+
+    protected override Task<int> ExecuteAsync(
+        CommandContext context, SkillInstallSettings settings, CancellationToken cancellationToken)
+    {
+        var selected = ResolveTargets(settings);
+        if (selected.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No targets selected. Nothing to do.[/]");
+            return Task.FromResult(0);
+        }
+
+        foreach (var name in selected)
+        {
+            var path = Targets[name];
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, SkillContent.Text);
+            AnsiConsole.MarkupLine($"[green]✓[/] Installed skill for [bold]{name}[/] to {path}");
+        }
+
+        return Task.FromResult(0);
+    }
+
+    private static List<string> ResolveTargets(SkillInstallSettings settings)
+    {
+        if (settings.Claude || settings.Codex)
+        {
+            var result = new List<string>();
+            if (settings.Claude) result.Add("Claude Code");
+            if (settings.Codex) result.Add("Codex");
+            return result;
+        }
+
+        if (Console.IsInputRedirected)
+        {
+            return [.. Targets.Keys];
+        }
+
+        var prompt = new MultiSelectionPrompt<string>()
+            .Title("Install skill for which agents?")
+            .AddChoices(Targets.Keys)
+            .InstructionsText("[grey](Press [blue]<space>[/] to toggle, [green]<enter>[/] to confirm)[/]");
+
+        foreach (var key in Targets.Keys)
+            prompt.Select(key);
+
+        return AnsiConsole.Prompt(prompt);
+    }
+}
+
+internal sealed class SkillShowCommand : AsyncCommand<SkillShowCommand.Settings>
 {
     internal sealed class Settings : CommandSettings;
 
