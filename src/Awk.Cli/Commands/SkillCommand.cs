@@ -99,11 +99,9 @@ description: Manage projects, users, time entries and more in awork directly fro
 
 # awork CLI Guide
 
-> AI-friendly reference for the awork CLI. Pipe to your agent: `awork skill`
-
 ## Overview
 
-`awork` is a CLI for the awork API. Commands are auto-generated from `swagger.json` — always in sync with the API.
+`awork` is a CLI for the awork API.
 
 ## Output Contract
 
@@ -309,18 +307,6 @@ Non-2xx responses still return the envelope:
   "traceId": "...",
   "response": {"error": "Bad Request", "message": "..."}
 }
-```
-
-Check `statusCode` to determine success:
-
-```bash
-result=$(awork users get invalid-id)
-status=$(echo "$result" | jq '.statusCode')
-if [[ "$status" -ge 200 && "$status" -lt 300 ]]; then
-  echo "Success"
-else
-  echo "Error: $status"
-fi
 ```
 
 ## Tips for AI Agents
