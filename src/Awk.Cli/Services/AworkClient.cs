@@ -307,6 +307,21 @@ public sealed partial class AworkClient
         {
             foreach (var property in root.EnumerateObject())
             {
+                if (IsMultipartBinaryField(property.Name))
+                {
+                    var binaryValue = property.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => property.Value.GetString() ?? string.Empty,
+                        JsonValueKind.Null => string.Empty,
+                        _ => property.Value.GetRawText()
+                    };
+
+                    var binaryContent = new ByteArrayContent(Encoding.UTF8.GetBytes(binaryValue));
+                    binaryContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    form.Add(binaryContent, property.Name, $"{property.Name}.txt");
+                    continue;
+                }
+
                 var value = property.Value.ValueKind switch
                 {
                     JsonValueKind.String => property.Value.GetString() ?? string.Empty,
@@ -319,6 +334,10 @@ public sealed partial class AworkClient
 
         return form;
     }
+
+    private static bool IsMultipartBinaryField(string name) =>
+        string.Equals(name, "file", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "content", StringComparison.OrdinalIgnoreCase);
 
     private static string Escape(string value) => Uri.EscapeDataString(value);
 }
