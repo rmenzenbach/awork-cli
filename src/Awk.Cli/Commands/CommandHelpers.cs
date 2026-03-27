@@ -28,7 +28,7 @@ internal static class CommandHelpers
         }
     }
 
-    internal static object? BuildBody(string? rawBody, IEnumerable<string>? setPairs, IEnumerable<string>? setJsonPairs)
+    internal static object? BuildBody(string? rawBody, IEnumerable<string>? setPairs, IEnumerable<string>? setJsonPairs, object? fallbackBody = null)
     {
         var hasSets = (setPairs is not null && setPairs.Any()) || (setJsonPairs is not null && setJsonPairs.Any());
         if (!hasSets)
@@ -48,6 +48,10 @@ internal static class CommandHelpers
             {
                 throw new InvalidOperationException("Body must be JSON when using --set/--set-json.");
             }
+        }
+        else if (fallbackBody is not null)
+        {
+            root = ResolveBodyNode(fallbackBody);
         }
 
         root ??= new JsonObject();
@@ -86,6 +90,22 @@ internal static class CommandHelpers
             var value = treatAsJson ? ParseJsonValue(valueRaw) : ParseScalarValue(valueRaw);
             SetPathValue(root, key, value);
         }
+    }
+
+    private static JsonNode? ResolveBodyNode(object body)
+    {
+        if (body is JsonNode jsonNode)
+        {
+            return jsonNode.DeepClone();
+        }
+
+        if (body is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined) return null;
+            return JsonNode.Parse(element.GetRawText());
+        }
+
+        return JsonSerializer.SerializeToNode(body);
     }
 
     private static JsonNode? ParseScalarValue(string value)

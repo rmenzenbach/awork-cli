@@ -527,6 +527,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
             var settingsName = "Settings";
             var pathParams = OrderPathParams(op.Path, op.Parameters.Where(p => p.Location == "path").ToList());
             var queryParams = op.Parameters.Where(p => p.Location == "query").ToList();
+            var mergeSourceOperation = FindMergeSourceOperation(op, operations);
 
             sb.AppendLine($"internal sealed class {className} : CommandBase<{className}.{settingsName}>");
             sb.AppendLine("{");
@@ -667,12 +668,52 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
                 sb.AppendLine("            var mergedSet = CommandHelpers.MergePairs(settings.Set, setPairs);");
                 sb.AppendLine("            var mergedSetJson = CommandHelpers.MergePairs(settings.SetJson, setJsonPairs);");
 
+                if (string.Equals(op.Method, "PUT", StringComparison.OrdinalIgnoreCase) && mergeSourceOperation is null)
+                {
+                    sb.AppendLine("            if ((mergedSet is not null && mergedSet.Any()) || (mergedSetJson is not null && mergedSetJson.Any()))");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                throw new InvalidOperationException(\"This PUT endpoint requires explicit JSON via --body because no fetch-by-id route exists for safe merge.\");");
+                    sb.AppendLine("            }");
+                }
+
                 if (op.BodyProperties is { Count: > 0 })
                 {
                     sb.AppendLine("            ValidateBodyKeys(mergedSet, mergedSetJson, AllowedBodyKeys);");
                 }
 
-                sb.AppendLine("            var body = CommandHelpers.BuildBody(settings.Body, mergedSet, mergedSetJson);");
+                if (mergeSourceOperation is not null)
+                {
+                    sb.AppendLine("            var hasBodyOverrides = (mergedSet is not null && mergedSet.Any()) || (mergedSetJson is not null && mergedSetJson.Any());");
+                    sb.AppendLine("            object? mergeBaseBody = null;");
+                    sb.AppendLine("            if (hasBodyOverrides && string.IsNullOrWhiteSpace(settings.Body))");
+                    sb.AppendLine("            {");
+
+                    var getCall = new StringBuilder();
+                    getCall.Append($"                var current = await client.{mergeSourceOperation.MethodName}(");
+                    var getArgFirst = true;
+                    foreach (var param in pathParams)
+                    {
+                        if (!getArgFirst) getCall.Append(", ");
+                        getArgFirst = false;
+                        getCall.Append($"settings.{param.PropertyName}");
+                    }
+                    if (!getArgFirst) getCall.Append(", ");
+                    getCall.Append("null, cancellationToken);");
+                    sb.AppendLine(getCall.ToString());
+
+                    sb.AppendLine("                if (current.StatusCode is < 200 or > 299)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    throw new InvalidOperationException($\"Failed to fetch current resource before update (status {current.StatusCode}).\");");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("                mergeBaseBody = current.Response;");
+                    sb.AppendLine("            }");
+                    sb.AppendLine("            var body = CommandHelpers.BuildBody(settings.Body, mergedSet, mergedSetJson, mergeBaseBody);");
+                }
+                else
+                {
+                    sb.AppendLine("            var body = CommandHelpers.BuildBody(settings.Body, mergedSet, mergedSetJson);");
+                }
+
                 if (op.BodyRequired)
                 {
                     sb.AppendLine("            if (body is null) throw new InvalidOperationException(\"Body is required.\");");
@@ -1226,6 +1267,31 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         }
 
         return ordered;
+    }
+
+    private static OperationInfo? FindMergeSourceOperation(OperationInfo op, List<OperationInfo> operations)
+    {
+        if (!string.Equals(op.Method, "PUT", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!op.HasBody) return null;
+
+        var opPathParams = OrderPathParams(op.Path, op.Parameters.Where(p => p.Location == "path").ToList())
+            .Select(p => p.Name)
+            .ToList();
+
+        foreach (var candidate in operations)
+        {
+            if (!string.Equals(candidate.Method, "GET", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(candidate.Path, op.Path, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var candidatePathParams = OrderPathParams(candidate.Path, candidate.Parameters.Where(p => p.Location == "path").ToList())
+                .Select(p => p.Name)
+                .ToList();
+
+            if (!opPathParams.SequenceEqual(candidatePathParams, StringComparer.OrdinalIgnoreCase)) continue;
+            return candidate;
+        }
+
+        return null;
     }
 
     private static HashSet<string> BuildCollectionPathsWithItem(List<OperationInfo> operations)

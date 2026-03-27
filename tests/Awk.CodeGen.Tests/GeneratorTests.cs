@@ -368,6 +368,25 @@ public sealed class GeneratorTests
         Assert.True(bad.Count == 0, $"Bad client method names: {string.Join(", ", bad)}");
     }
 
+    [Fact]
+    public void PutCommands_WithMatchingGet_MergeWithFetchedBody()
+    {
+        var cli = GeneratedSources.Value.Cli;
+
+        Assert.Contains("var hasBodyOverrides = (mergedSet is not null && mergedSet.Any()) || (mergedSetJson is not null && mergedSetJson.Any());", cli);
+        Assert.Contains("var current = await client.GetUserById(settings.UserId, null, cancellationToken);", cli);
+        Assert.Contains("var body = CommandHelpers.BuildBody(settings.Body, mergedSet, mergedSetJson, mergeBaseBody);", cli);
+    }
+
+    [Fact]
+    public void PutCommands_WithoutMatchingGet_RequireExplicitJsonBody()
+    {
+        var cli = GeneratedSources.Value.Cli;
+
+        Assert.Contains("internal sealed class PutAccount", cli);
+        Assert.Contains("This PUT endpoint requires explicit JSON via --body because no fetch-by-id route exists for safe merge.", cli);
+    }
+
     private static IEnumerable<string> ExtractCommandNames(string cliSource)
     {
         var matches = Regex.Matches(cliSource, "AddCommand<[^>]+>\\(\\\"([a-z0-9\\-]+)\\\"\\)");

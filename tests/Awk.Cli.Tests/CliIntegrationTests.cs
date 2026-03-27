@@ -168,7 +168,7 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
-    public async Task UsersAssign_BuildsBodyFromSetAndSetJson()
+    public async Task UsersAssign_RejectsShorthandBodyOptionsWithoutMergeRoute()
     {
         using var server = new TestServer(async ctx =>
         {
@@ -186,8 +186,32 @@ public sealed class CliIntegrationTests
             "--set-json",
             "userIds=[\"user-1\",\"user-2\"]");
 
-        Assert.Equal(0, result.ExitCode);
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains(
+            "requires explicit JSON via --body",
+            output.RootElement.GetProperty("response").GetProperty("error").GetString());
+        Assert.Empty(server.Requests);
+    }
 
+    [Fact]
+    public async Task UsersAssign_AcceptsExplicitJsonBody()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 204;
+            await ctx.Response.OutputStream.FlushAsync();
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "workspace",
+            "absence-regions",
+            "users-assign",
+            "--body",
+            "{\"regionId\":\"region-1\",\"userIds\":[\"user-1\",\"user-2\"]}");
+
+        Assert.Equal(0, result.ExitCode);
         var request = server.Requests.Single();
         Assert.Equal("PUT", request.Method);
         Assert.Equal("/absenceregions/users/assign", request.Path);
@@ -196,6 +220,87 @@ public sealed class CliIntegrationTests
         Assert.Equal("region-1", body.RootElement.GetProperty("regionId").GetString());
         var ids = body.RootElement.GetProperty("userIds").EnumerateArray().Select(x => x.GetString()).ToList();
         Assert.Equal(new[] { "user-1", "user-2" }, ids);
+    }
+
+    [Fact]
+    public async Task UsersUpdate_PartialOption_MergesWithFetchedUser()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            var path = ctx.Request.Url?.AbsolutePath ?? string.Empty;
+            if (ctx.Request.HttpMethod == "GET" && path == "/users/user-1")
+            {
+                ctx.Response.StatusCode = 200;
+                await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                    {
+                      "firstName": "Old",
+                      "lastName": "Name",
+                      "birthDate": "1988-01-15",
+                      "gender": "other",
+                      "title": "Dr",
+                      "position": "Engineer",
+                      "language": "de"
+                    }
+                    """);
+                return;
+            }
+
+            if (ctx.Request.HttpMethod == "PUT" && path == "/users/user-1")
+            {
+                ctx.Response.StatusCode = 200;
+                await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+                return;
+            }
+
+            ctx.Response.StatusCode = 404;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"error\":\"not found\"}");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "update",
+            "user-1",
+            "--first-name",
+            "New");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(2, server.Requests.Count);
+
+        var getRequest = server.Requests[0];
+        var putRequest = server.Requests[1];
+        Assert.Equal("GET", getRequest.Method);
+        Assert.Equal("/users/user-1", getRequest.Path);
+        Assert.Equal("PUT", putRequest.Method);
+        Assert.Equal("/users/user-1", putRequest.Path);
+
+        var body = JsonDocument.Parse(putRequest.Body ?? "{}");
+        Assert.Equal("New", body.RootElement.GetProperty("firstName").GetString());
+        Assert.Equal("Name", body.RootElement.GetProperty("lastName").GetString());
+        Assert.Equal("1988-01-15", body.RootElement.GetProperty("birthDate").GetString());
+        Assert.Equal("other", body.RootElement.GetProperty("gender").GetString());
+        Assert.Equal("Dr", body.RootElement.GetProperty("title").GetString());
+        Assert.Equal("Engineer", body.RootElement.GetProperty("position").GetString());
+        Assert.Equal("de", body.RootElement.GetProperty("language").GetString());
+    }
+
+    [Fact]
+    public async Task PutWithoutMergeRoute_RejectsShorthandBodyOptions()
+    {
+        var result = await RunCliAsync(
+            new Uri("http://127.0.0.1:1/"),
+            "auth",
+            "accounts",
+            "update",
+            "account-1",
+            "--first-name",
+            "New");
+
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains(
+            "requires explicit JSON via --body",
+            output.RootElement.GetProperty("response").GetProperty("error").GetString());
     }
 
     [Fact]
@@ -315,7 +420,7 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
-    public async Task SetJson_FileArray_WritesArrayBody()
+    public async Task SetJson_FileArray_RejectsWithoutMergeRoute()
     {
         using var server = new TestServer(async ctx =>
         {
@@ -336,11 +441,12 @@ public sealed class CliIntegrationTests
             "--set-json",
             "userIds=@" + tempFile);
 
-        Assert.Equal(0, result.ExitCode);
-        var request = server.Requests.Single();
-        var body = JsonDocument.Parse(request.Body ?? "{}");
-        var ids = body.RootElement.GetProperty("userIds").EnumerateArray().Select(x => x.GetString()).ToList();
-        Assert.Equal(new[] { "u1", "u2" }, ids);
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains(
+            "requires explicit JSON via --body",
+            output.RootElement.GetProperty("response").GetProperty("error").GetString());
+        Assert.Empty(server.Requests);
     }
 
     [Fact]
