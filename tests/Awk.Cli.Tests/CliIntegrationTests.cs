@@ -420,7 +420,7 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
-    public async Task SetJson_FileArray_WritesArrayBody()
+    public async Task SetJson_FileArray_RejectsWithoutMergeRoute()
     {
         using var server = new TestServer(async ctx =>
         {
@@ -441,11 +441,12 @@ public sealed class CliIntegrationTests
             "--set-json",
             "userIds=@" + tempFile);
 
-        Assert.Equal(0, result.ExitCode);
-        var request = server.Requests.Single();
-        var body = JsonDocument.Parse(request.Body ?? "{}");
-        var ids = body.RootElement.GetProperty("userIds").EnumerateArray().Select(x => x.GetString()).ToList();
-        Assert.Equal(new[] { "u1", "u2" }, ids);
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains(
+            "requires explicit JSON via --body",
+            output.RootElement.GetProperty("response").GetProperty("error").GetString());
+        Assert.Empty(server.Requests);
     }
 
     [Fact]
