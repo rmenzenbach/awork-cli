@@ -31,18 +31,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-latest
-            rid: osx-arm64
-            artifact: awork-osx-arm64
-          - os: macos-15-large
-            rid: osx-x64
-            artifact: awork-osx-x64
-          - os: ubuntu-latest
-            rid: linux-x64
-            artifact: awork-linux-x64
-          - os: windows-latest
-            rid: win-x64
-            artifact: awork-win-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            artifact: awork-linux-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -58,12 +49,7 @@ jobs:
         run: dotnet publish src/Awk.Cli -c Release -r ${{ matrix.rid }} -o publish
 
       - name: Package (Unix)
-        if: runner.os != 'Windows'
         run: tar -czvf ${{ matrix.artifact }}.tar.gz -C publish .
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: Compress-Archive -Path publish/* -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -102,14 +88,9 @@ jobs:
         run: |
           set -e
 
-          # Download release assets and compute SHA256
-          curl -sL "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-osx-arm64.tar.gz" -o arm64.tar.gz
-          curl -sL "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-osx-x64.tar.gz" -o x64.tar.gz
-          curl -sL "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-linux-x64.tar.gz" -o linux.tar.gz
-
-          SHA_ARM64=$(sha256sum arm64.tar.gz | cut -d' ' -f1)
-          SHA_X64=$(sha256sum x64.tar.gz | cut -d' ' -f1)
-          SHA_LINUX=$(sha256sum linux.tar.gz | cut -d' ' -f1)
+          # Download the only published release asset and compute SHA256
+          curl -sL "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-linux-arm64.tar.gz" -o linux-arm64.tar.gz
+          SHA_LINUX_ARM64=$(sha256sum linux-arm64.tar.gz | cut -d' ' -f1)
 
           # Clone homebrew-awork-cli
           git clone "https://x-access-token:${GH_TOKEN}@github.com/awork-io/homebrew-awork-cli.git" tap
@@ -123,21 +104,9 @@ jobs:
             version "${VERSION}"
             license "MIT"
 
-            on_macos do
-              on_arm do
-                url "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-osx-arm64.tar.gz"
-                sha256 "${SHA_ARM64}"
-              end
-
-              on_intel do
-                url "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-osx-x64.tar.gz"
-                sha256 "${SHA_X64}"
-              end
-            end
-
             on_linux do
-              url "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-linux-x64.tar.gz"
-              sha256 "${SHA_LINUX}"
+              url "https://github.com/awork-io/awork-cli/releases/download/${TAG}/awork-linux-arm64.tar.gz"
+              sha256 "${SHA_LINUX_ARM64}"
             end
 
             def install
