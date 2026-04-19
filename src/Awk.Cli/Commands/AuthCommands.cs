@@ -101,12 +101,6 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
                 throw new InvalidOperationException("OAuth redirect URI invalid.");
             }
 
-            if (redirectUriParsed.Scheme != Uri.UriSchemeHttp ||
-                (redirectUriParsed.Host != "localhost" && redirectUriParsed.Host != "127.0.0.1"))
-            {
-                throw new InvalidOperationException("OAuth redirect URI must be http://localhost or http://127.0.0.1.");
-            }
-
             var authRequest = OAuthAuthorizationRequestFactory.CreateAwork(
                 clientId,
                 redirectUri,
@@ -122,13 +116,42 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
                 Console.Error.WriteLine($"auth: open this URL to continue: {authRequest.Url}");
             }
 
-            await using var server = new OAuthRedirectServer(redirectUriParsed);
-            server.Start();
+            Console.Error.Write("auth: paste the redirected URL here: ");
+            var pastedUrl = Console.ReadLine();
 
-            var callback = await server.WaitForCallback(authRequest.State, cancellationToken);
+            if (string.IsNullOrWhiteSpace(pastedUrl))
+            {
+                throw new InvalidOperationException("OAuth callback URL is empty.");
+            }
+
+            if (!Uri.TryCreate(pastedUrl.Trim(), UriKind.Absolute, out var callbackUri))
+            {
+                throw new InvalidOperationException("OAuth callback URL is invalid.");
+            }
+
+            var query = System.Web.HttpUtility.ParseQueryString(callbackUri.Query);
+            var code = query["code"];
+            var state = query["state"];
+            var error = query["error"];
+
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                throw new InvalidOperationException($"OAuth error: {error}");
+            }
+
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                throw new InvalidOperationException("OAuth callback missing code.");
+            }
+
+            if (!string.Equals(state, authRequest.State, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("OAuth callback state mismatch.");
+            }
+
             var oauthToken = await AworkOAuthService.ExchangeCode(
                 clientId,
-                callback.Code,
+                code,
                 authRequest.CodeVerifier,
                 redirectUri,
                 cancellationToken);
